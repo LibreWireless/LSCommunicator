@@ -291,17 +291,15 @@ extension LuciDiscovery: GCDAsyncSocketDelegate {
         }
         
         let node = MSearchHelper.parseMSearch(payload: message, from: host)
-        guard self.nodesList.first(where: { $0.id == node.id }) == nil else {
-            print("Node with name \(node.friendlyName) exists")
-            return
+        if self.nodesList.first(where: { $0.id == node.id }) == nil {
+            self.nodesList.append(node)
         }
-        self.nodesList.append(node)
-        
+        print("Node with name \(node.friendlyName) exists")
         sock.readData(withTimeout: -1, tag: tag)
     }
     
     public func socket(_ sock: GCDAsyncSocket, didConnectToHost host: String, port: UInt16) {
-        print("✅ \(self) Socket Did Connect to Host \(host) on Port \(port)")
+        print("✅\(self) Socket Did Connect to Host \(host) on Port \(port)")
     }
     
     public func socket(_ sock: GCDAsyncSocket, didReceive trust: SecTrust, completionHandler: @escaping (Bool) -> Void) {
@@ -350,11 +348,10 @@ extension LuciDiscovery: GCDAsyncUdpSocketDelegate {
         print("UDP did receive data from \(host!):\(port)")
         print(message)
         let node = MSearchHelper.parseMSearch(payload: message, from: host! as String)
-        guard self.nodesList.first(where: { $0.id == node.id }) == nil else {
-            print("Node with name \(node.friendlyName) exists")
-            return
+        if self.nodesList.first(where: { $0.id == node.id }) == nil {
+            self.nodesList.append(node)
         }
-        self.nodesList.append(node)
+        print("Node with name \(node.friendlyName) exists")
     }
     
     public func udpSocket(_ sock: GCDAsyncUdpSocket, didConnectToAddress address: Data) {
