@@ -110,6 +110,7 @@ public class LuciDiscovery: NSObject {
                 self.httpPort += 1
             }
             if (self.didConnect) {
+                self.startScan()
                 break
             }
         }
