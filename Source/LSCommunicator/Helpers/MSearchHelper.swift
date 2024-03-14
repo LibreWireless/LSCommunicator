@@ -48,8 +48,8 @@ class MSearchHelper {
         
         let fwversion = message.parseMessage(for: firmwareVersion)
 
-        let nodeID = deviceName + IP
-        let node = Node(id: nodeID, friendlyName: deviceName, model: castModel, ipAddress: IP, port: UInt16(nodePort)!, firmwareVersion: fwversion)
+        let nodeID = deviceName + "_" + IP
+        let node = Node(id: nodeID, friendlyName: deviceName, model: castModel, ipAddress: IP, port: UInt16(nodePort)!, firmwareVersion: fwversion, luciSocket: nil)
         
         return node
     }

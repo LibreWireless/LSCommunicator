@@ -12,7 +12,7 @@ let package = Package(
             targets: ["LSCommunicator"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/robbiehanson/CocoaAsyncSocket", from: "7.6.4")
+        .package(url: "https://github.com/robbiehanson/CocoaAsyncSocket", from: "7.6.4"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.

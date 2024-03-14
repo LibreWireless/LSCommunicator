@@ -1,6 +1,6 @@
 //
-//  File.swift
-//  
+//  LuciDiscovery.swift
+//
 //
 //  Created by Guru on 27/02/24.
 //
@@ -8,36 +8,37 @@
 import Foundation
 import CocoaAsyncSocket
 
-public protocol DiscoveryDelegate: AnyObject {
-
+public protocol LuciDiscoveryDelegate: AnyObject {
     /// Function to notify updated nodes list
     func luciDidDisover(nodes: [Node])
     
 }
 
-public class LuciDiscovery: NSObject {
-    
-    public static let shared = LuciDiscovery()
-    
+public enum DiscoveryError: Error {
+    /// No valid timer is set to invalidate timer
+    case invalidTimer
+}
+
+public final class LuciDiscovery: NSObject {
+        
     private var interface: String?
     
     private var msearchUDPSocket: GCDAsyncUdpSocket?
     private var msearchTCPSocket: GCDAsyncSocket?
     
-    private var msearchTimeout: Int?
     private var msearchInterval: Int?
     private var model: String?
     
     private var discoveryTimer: Timer?
     private var msearchIntervalTimer: Timer?
-    
-    private var httpPort: UInt16!
-    
+        
     private var connectedSockets = [GCDAsyncSocket]()
 
-    public weak var delegate: DiscoveryDelegate?
+    public weak var delegate: LuciDiscoveryDelegate?
     
-    private var nodesList: [Node] {
+    private (set) var httpPort: UInt16
+    
+    var nodesList: [Node] {
         didSet {
             self.nodesListUpdated()
         }
@@ -49,27 +50,30 @@ public class LuciDiscovery: NSObject {
         case AfterSAC
     }
     
-    private override init() {
-        self.nodesList = [Node]()
-        
-        super.init()
-        
+    public init(delegate: LuciDiscoveryDelegate) {
+        self.delegate = delegate
+
         self.httpPort = UInt16(arc4random_uniform(1600) + 49152)
-        
         self.interface = NetworkHelper.shared.interfaceAddress
-        
-        guard self.interface != nil else { return }
+
+        self.nodesList = [Node]()
+
+        super.init()
     }
     
+    /// Start Dicovering LS Module by sending MSearch
     public func startDiscovery() {
         self.initSocketSetup()
     }
     
-    public func startDiscovery(timeout: Int = .max, interval: Int = 30, model: String?) {
-        self.msearchTimeout = timeout
-        self.msearchInterval = interval
+    /// Start Dicovering LS Module
+    /// - Parameters:
+    ///   - interval: Intermediate Time interval to publish MSearch
+    ///   - model: Model used to filter LS Module post discovery
+    public func startDiscovery(interval: UInt = 30, model: String? = nil) {
+        self.msearchInterval = Int(interval)
         self.model = model
-        
+
         self.startDiscovery()
     }
     
@@ -102,8 +106,6 @@ public class LuciDiscovery: NSObject {
     
     private func initSocketSetup() {
         startIntervalTimer()
-        
-        startDiscoveryTimer()
         
         for i in 0..<200 {
             if i > 0 {
@@ -146,38 +148,13 @@ public class LuciDiscovery: NSObject {
         do {
             try connectUDP()
         } catch let bindError {
-            print("Tried to reconnect UDP on \(self.httpPort!) but failed to bind with error \(bindError)")
+            print("Tried to reconnect UDP on \(self.httpPort) but failed to bind with error \(bindError)")
         }
     }
     
+    /// Calls the delegate to notify updated node list
     private func nodesListUpdated() {
-        if self.nodesList.count > 0 {
-            self.delegate?.luciDidDisover(nodes: self.nodesList)
-        }
-    }
-    
-    /// Starts timer for stopping discovery for specified timeout
-    private func startDiscoveryTimer() {
-        guard let msearchTimeout = msearchTimeout, Double(msearchTimeout) > 0 else {
-            return
-        }
-        DispatchQueue.main.async {
-            self.discoveryTimer = Timer.scheduledTimer(timeInterval: Double(msearchTimeout),
-                                                             target: self,
-                                                             selector: #selector(self.stopDiscovery),
-                                                             userInfo: nil, repeats: false)
-        }
-    }
-    
-    /// Stops discovering new LS Modules
-    @objc
-    private func stopDiscovery() {
-        DispatchQueue.main.async {
-            self.discoveryTimer?.invalidate()
-            self.discoveryTimer = nil
-        }
-        msearchUDPSocket?.setDelegate(nil)
-        msearchTCPSocket?.delegate = nil
+        self.delegate?.luciDidDisover(nodes: self.nodesList)
     }
     
     /// Send's MSearch in sepcified interval
@@ -185,6 +162,7 @@ public class LuciDiscovery: NSObject {
         guard let msearchInterval = msearchInterval, Double(msearchInterval) > 0 else {
             return
         }
+        print("Scheduling timer to send MSearch in interval of \(Double(msearchInterval)) seconds")
         DispatchQueue.main.async {
             self.msearchIntervalTimer = Timer.scheduledTimer(timeInterval: Double(msearchInterval),
                                                              target: self,
@@ -195,13 +173,34 @@ public class LuciDiscovery: NSObject {
     
     @objc
     private func triggerMSearch() {
+        print("MSearch sent for interval scheduled")
         self.startScan(sceneName: .Active)
     }
     
-    public func stop30SecMsearchTimer() {
+    /// Call the function in case if you want to remove the scheduled interval timer
+    public func stopIntervalTimer() throws {
+        print("Stopping discovery")
+        guard msearchIntervalTimer != nil && msearchIntervalTimer!.isValid else {
+            print("Stopping discovery")
+            throw DiscoveryError.invalidTimer
+        }
         DispatchQueue.main.async {
             self.msearchIntervalTimer?.invalidate()
             self.msearchIntervalTimer = nil
+        }
+    }
+    
+    /// Checks and adds node to list
+    /// - Parameter node: Node
+    private func addNodeToList(_ node: Node) {
+        if self.nodesList.first(where: { $0.id == node.id }) == nil {
+            if (self.model != nil) {
+                if (node.model == self.model) {
+                    self.nodesList.append(node)
+                }
+            } else {
+                self.nodesList.append(node)
+            }
         }
     }
 
@@ -209,7 +208,7 @@ public class LuciDiscovery: NSObject {
 
 extension LuciDiscovery {
     
-    func startScan() {
+    private func startScan() {
         let payload = MSearchHelper.getPayload()
         msearchUDPSocket?.send(payload,
                                toHost: MSearchHelper.mCastAddress,
@@ -220,14 +219,14 @@ extension LuciDiscovery {
         sendBroadCastForMeshNetwork()
     }
     
-    func sendBroadCast() {
+    private func sendBroadCast() {
         let payload = MSearchHelper.getPayload()
         msearchUDPSocket?.send(payload,
                                toHost: MSearchHelper.UDPIPAddress,
                                port: MSearchHelper.mSearchPort, withTimeout: -1, tag: 1)
     }
     
-    func sendBroadCastForMeshNetwork() {
+    private func sendBroadCastForMeshNetwork() {
         guard let availableInterfaces = NetworkHelper.shared.availableInterfaces else { return }
         for interface in availableInterfaces  {
             if(interface.name == "en0") {
@@ -240,7 +239,7 @@ extension LuciDiscovery {
         }
     }
     
-    func startScan(sceneName: SceneName) {
+    private func startScan(sceneName: SceneName) {
         if msearchUDPSocket == nil && msearchTCPSocket == nil {
             self.initSocketSetup()
         }
@@ -257,8 +256,8 @@ extension LuciDiscovery {
         }
     }
     
-    func udpMSearch(currentHit: Int, totalHit: Int, data: Data) {
-        msearchUDPSocket?.send(data, 
+    private func udpMSearch(currentHit: Int, totalHit: Int, data: Data) {
+        msearchUDPSocket?.send(data,
                                toHost: MSearchHelper.mCastAddress,
                                port: MSearchHelper.mSearchPort, withTimeout: -1, tag: 1)
         
@@ -281,10 +280,7 @@ extension LuciDiscovery: GCDAsyncSocketDelegate {
         else {
             return
         }
-        let port = Int(sock.connectedPort)
-        print("Did receive data from \(host):\(port)")
-        print(message)
-        
+
         guard let startLine = message.parseFirstLine() else { return }
         if (startLine == "OK") {
             sock.readData(withTimeout: -1, tag: tag)
@@ -292,10 +288,8 @@ extension LuciDiscovery: GCDAsyncSocketDelegate {
         }
         
         let node = MSearchHelper.parseMSearch(payload: message, from: host)
-        if self.nodesList.first(where: { $0.id == node.id }) == nil {
-            self.nodesList.append(node)
-        }
-        print("Node with name \(node.friendlyName) exists")
+        self.addNodeToList(node)
+
         sock.readData(withTimeout: -1, tag: tag)
     }
     
@@ -346,13 +340,9 @@ extension LuciDiscovery: GCDAsyncUdpSocketDelegate {
         var host: NSString? = ""
         var port: UInt16 = 0
         GCDAsyncUdpSocket.getHost(&host, port: &port, fromAddress: address)
-        print("UDP did receive data from \(host!):\(port)")
-        print(message)
+
         let node = MSearchHelper.parseMSearch(payload: message, from: host! as String)
-        if self.nodesList.first(where: { $0.id == node.id }) == nil {
-            self.nodesList.append(node)
-        }
-        print("Node with name \(node.friendlyName) exists")
+        self.addNodeToList(node)
     }
     
     public func udpSocket(_ sock: GCDAsyncUdpSocket, didConnectToAddress address: Data) {
